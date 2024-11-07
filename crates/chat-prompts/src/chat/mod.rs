@@ -175,6 +175,9 @@ impl From<PromptTemplateType> for ChatPrompt {
             PromptTemplateType::Embedding => {
                 panic!("Embedding prompt template is not used for building chat prompts")
             }
+            PromptTemplateType::Reranker => {
+                panic!("Reranker prompt template is not used for building chat prompts")
+            }
             PromptTemplateType::Null => {
                 panic!("Null prompt template is not used for building chat prompts")
             }

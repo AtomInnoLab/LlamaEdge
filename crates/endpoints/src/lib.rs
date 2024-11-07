@@ -5,6 +5,7 @@ pub mod chat;
 pub mod common;
 pub mod completions;
 pub mod embeddings;
+pub mod reranker;
 pub mod files;
 pub mod images;
 pub mod models;
