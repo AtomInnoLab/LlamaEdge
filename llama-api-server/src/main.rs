@@ -320,7 +320,7 @@ async fn main() -> Result<(), ServerError> {
                 });
 
                 // initialize the core context
-                llama_core::init_core_context(None, Some(&[metadata_embedding]), None)
+                llama_core::init_ggml_context(None, Some(&[metadata_embedding]), None)
                     .map_err(|e| ServerError::Operation(format!("{}", e)))?;
             }
             PromptTemplateType::Reranker => {
@@ -349,7 +349,7 @@ async fn main() -> Result<(), ServerError> {
                 });
 
                 // initialize the core context
-                llama_core::init_core_context(None, None, Some(&[metadata_reranker]))
+                llama_core::init_ggml_context(None, None, Some(&[metadata_reranker]))
                     .map_err(|e| ServerError::Operation(format!("{}", e)))?;
             }
             _ => {
@@ -399,7 +399,7 @@ async fn main() -> Result<(), ServerError> {
                 });
 
                 // initialize the core context
-                llama_core::init_core_context(Some(&[metadata_chat]), None, None)
+                llama_core::init_ggml_context(Some(&[metadata_chat]), None, None)
                     .map_err(|e| ServerError::Operation(format!("{}", e)))?;
             }
         }
@@ -498,7 +498,7 @@ async fn main() -> Result<(), ServerError> {
         });
 
         // initialize the core context
-        llama_core::init_core_context(Some(&[metadata_chat]), Some(&[metadata_embedding]), Some(&[metadata_reranker]))
+        llama_core::init_ggml_context(Some(&[metadata_chat]), Some(&[metadata_embedding]), Some(&[metadata_reranker]))
             .map_err(|e| ServerError::Operation(format!("{}", e)))?;
     }
 
