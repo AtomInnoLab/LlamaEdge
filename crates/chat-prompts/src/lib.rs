@@ -93,6 +93,8 @@ pub enum PromptTemplateType {
     FunctionaryV31,
     #[value(name = "embedding")]
     Embedding,
+    #[value(name = "reranker")]
+    Reranker,
     #[value(name = "none")]
     Null,
 }
@@ -139,6 +141,7 @@ impl PromptTemplateType {
             | PromptTemplateType::FunctionaryV32
             | PromptTemplateType::FunctionaryV31
             | PromptTemplateType::Embedding
+            | PromptTemplateType::Reranker
             | PromptTemplateType::Null => false,
         }
     }
@@ -189,6 +192,7 @@ impl FromStr for PromptTemplateType {
             "functionary-32" => Ok(PromptTemplateType::FunctionaryV32),
             "functionary-31" => Ok(PromptTemplateType::FunctionaryV31),
             "embedding" => Ok(PromptTemplateType::Embedding),
+            "reranker" => Ok(PromptTemplateType::Reranker),
             "none" => Ok(PromptTemplateType::Null),
             _ => Err(error::PromptError::UnknownPromptTemplateType(
                 template.to_string(),
@@ -239,6 +243,7 @@ impl std::fmt::Display for PromptTemplateType {
             PromptTemplateType::FunctionaryV32 => write!(f, "functionary-32"),
             PromptTemplateType::FunctionaryV31 => write!(f, "functionary-31"),
             PromptTemplateType::Embedding => write!(f, "embedding"),
+            PromptTemplateType::Reranker => write!(f, "reranker"),
             PromptTemplateType::Null => write!(f, "none"),
         }
     }

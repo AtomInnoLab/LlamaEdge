@@ -8,6 +8,7 @@ pub mod audio;
 pub mod chat;
 pub mod completions;
 pub mod embeddings;
+pub mod reranker;
 pub mod error;
 pub mod graph;
 pub mod images;
@@ -39,6 +40,9 @@ pub(crate) static CHAT_GRAPHS: OnceCell<Mutex<HashMap<String, Graph<GgmlMetadata
 // key: model_name, value: Graph
 pub(crate) static EMBEDDING_GRAPHS: OnceCell<Mutex<HashMap<String, Graph<GgmlMetadata>>>> =
     OnceCell::new();
+// key: model_name, value: Graph
+pub(crate) static RERANKER_GRAPHS: OnceCell<Mutex<HashMap<String, Graph<GgmlMetadata>>>> =
+    OnceCell::new();
 // cache bytes for decoding utf8
 pub(crate) static CACHED_UTF8_ENCODINGS: OnceCell<Mutex<Vec<u8>>> = OnceCell::new();
 // running mode
@@ -60,12 +64,13 @@ const PLUGIN_VERSION: usize = 1;
 pub fn init_ggml_context(
     metadata_for_chats: Option<&[GgmlMetadata]>,
     metadata_for_embeddings: Option<&[GgmlMetadata]>,
+    metadata_for_reranker: Option<&[GgmlMetadata]>,
 ) -> Result<(), LlamaCoreError> {
     #[cfg(feature = "logging")]
     info!(target: "stdout", "Initializing the core context");
 
-    if metadata_for_chats.is_none() && metadata_for_embeddings.is_none() {
-        let err_msg = "Failed to initialize the core context. Please set metadata for chat completions and/or embeddings.";
+    if metadata_for_chats.is_none() && metadata_for_embeddings.is_none() && metadata_for_reranker.is_none() {
+        let err_msg = "Failed to initialize the core context. Please set metadata for chat completions and/or embeddings and/or reranker.";
 
         #[cfg(feature = "logging")]
         error!(target: "stdout", "{}", err_msg);
@@ -73,7 +78,7 @@ pub fn init_ggml_context(
         return Err(LlamaCoreError::InitContext(err_msg.into()));
     }
 
-    let mut mode = RunningMode::Embeddings;
+    let mut mode: RunningMode = RunningMode::Embeddings;
 
     if let Some(metadata_chats) = metadata_for_chats {
         let mut chat_graphs = HashMap::new();
@@ -114,6 +119,29 @@ pub fn init_ggml_context(
 
         if mode == RunningMode::Chat {
             mode = RunningMode::ChatEmbedding;
+        }
+    }
+
+    if let Some(metadata_reranker) = metadata_for_reranker {
+        let mut reranker_graphs = HashMap::new();
+        for metadata in metadata_reranker {
+            let graph = Graph::new(metadata.clone())?;
+
+            reranker_graphs.insert(graph.name().to_string(), graph);
+        }
+        RERANKER_GRAPHS
+            .set(Mutex::new(reranker_graphs))
+            .map_err(|_| {
+                let err_msg = "Failed to initialize the core context. Reason: The `RERANKER_GRAPHS` has already been initialized";
+
+                #[cfg(feature = "logging")]
+                error!(target: "stdout", "{}", err_msg);
+
+                LlamaCoreError::InitContext(err_msg.into())
+            })?;
+
+        if mode == RunningMode::ChatEmbedding {
+            mode = RunningMode::ChatEmbeddingReranker;
         }
     }
 
@@ -390,7 +418,9 @@ impl std::fmt::Display for PluginInfo {
 pub enum RunningMode {
     Chat,
     Embeddings,
+    Reranker,
     ChatEmbedding,
+    ChatEmbeddingReranker,
     Rag,
 }
 impl std::fmt::Display for RunningMode {
@@ -398,7 +428,9 @@ impl std::fmt::Display for RunningMode {
         match self {
             RunningMode::Chat => write!(f, "chat"),
             RunningMode::Embeddings => write!(f, "embeddings"),
+            RunningMode::Reranker => write!(f, "reranker"),
             RunningMode::ChatEmbedding => write!(f, "chat-embeddings"),
+            RunningMode::ChatEmbeddingReranker => write!(f, "chat-embeddings-reranker"),
             RunningMode::Rag => write!(f, "rag"),
         }
     }

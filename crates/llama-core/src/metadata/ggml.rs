@@ -164,6 +164,8 @@ pub struct GgmlMetadata {
     // pub stream_stdout: bool,
     #[serde(rename = "embedding")]
     pub embeddings: bool,
+    #[serde(rename = "reranking")]
+    pub reranking: bool,
     #[serde(rename = "n-predict")]
     pub n_predict: u64,
     #[serde(skip_serializing_if = "Option::is_none", rename = "reverse-prompt")]
@@ -225,6 +227,7 @@ impl Default for GgmlMetadata {
             prompt_template: PromptTemplateType::Llama2Chat,
             log_enable: false,
             embeddings: false,
+            reranking: false,
             n_predict: 1024,
             reverse_prompt: None,
             mmproj: None,

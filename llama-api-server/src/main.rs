@@ -35,7 +35,7 @@ const DEFAULT_PORT: &str = "8080";
 #[command(name = "LlamaEdge API Server", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "LlamaEdge API Server")]
 #[command(group = ArgGroup::new("socket_address_group").multiple(false).args(&["socket_addr", "port"]))]
 struct Cli {
-    /// Sets names for chat and/or embedding models. To run both chat and embedding models, the names should be separated by comma without space, for example, '--model-name Llama-2-7b,all-minilm'. The first value is for the chat model, and the second is for the embedding model.
+    /// Sets names for chat and/or embedding and/or reranker models. To run both chat and embedding models, the names should be separated by comma without space, for example, '--model-name Llama-2-7b,all-minilm'. The first value is for the chat model, and the second is for the embedding model.
     #[arg(short, long, value_delimiter = ',', default_value = "default")]
     model_name: Vec<String>,
     /// Model aliases for chat and embedding models
@@ -43,7 +43,7 @@ struct Cli {
         short = 'a',
         long,
         value_delimiter = ',',
-        default_value = "default,embedding"
+        default_value = "default,embedding,reranker"
     )]
     model_alias: Vec<String>,
     /// Sets context sizes for chat and/or embedding models. To run both chat and embedding models, the sizes should be separated by comma without space, for example, '--ctx-size 4096,384'. The first value is for the chat model, and the second is for the embedding model.
@@ -51,14 +51,14 @@ struct Cli {
         short = 'c',
         long,
         value_delimiter = ',',
-        default_value = "4096,384",
+        default_value = "4096,384,384",
         value_parser = clap::value_parser!(u64)
     )]
     ctx_size: Vec<u64>,
-    /// Sets batch sizes for chat and/or embedding models. To run both chat and embedding models, the sizes should be separated by comma without space, for example, '--batch-size 128,64'. The first value is for the chat model, and the second is for the embedding model.
-    #[arg(short, long, value_delimiter = ',', default_value = "512,512", value_parser = clap::value_parser!(u64))]
+    /// Sets batch sizes for chat and/or embedding and/or reranker models. To run both chat and embedding models, the sizes should be separated by comma without space, for example, '--batch-size 128,64,64'. The first value is for the chat model, and the second is for the embedding model.
+    #[arg(short, long, value_delimiter = ',', default_value = "512,512,512", value_parser = clap::value_parser!(u64))]
     batch_size: Vec<u64>,
-    /// Sets prompt templates for chat and/or embedding models, respectively. To run both chat and embedding models, the prompt templates should be separated by comma without space, for example, '--prompt-template llama-2-chat,embedding'. The first value is for the chat model, and the second is for the embedding model.
+    /// Sets prompt templates for chat and/or embedding and/or reranker models, respectively. To run both chat and embedding models, the prompt templates should be separated by comma without space, for example, '--prompt-template llama-2-chat,embedding,reranker'. The first value is for the chat model, and the second is for the embedding model.
     #[arg(short, long, value_delimiter = ',', value_parser = clap::value_parser!(PromptTemplateType), required = true)]
     prompt_template: Vec<PromptTemplateType>,
     /// Halt generation at PROMPT, return control.
@@ -291,6 +291,7 @@ async fn main() -> Result<(), ServerError> {
     // initialize the core context
     let mut chat_model_config = None;
     let mut embedding_model_config = None;
+    let mut reranker_model_config = None;
     if cli.prompt_template.len() == 1 {
         match cli.prompt_template[0] {
             PromptTemplateType::Embedding => {
@@ -319,7 +320,36 @@ async fn main() -> Result<(), ServerError> {
                 });
 
                 // initialize the core context
-                llama_core::init_ggml_context(None, Some(&[metadata_embedding]))
+                llama_core::init_core_context(None, Some(&[metadata_embedding]), None)
+                    .map_err(|e| ServerError::Operation(format!("{}", e)))?;
+            }
+            PromptTemplateType::Reranker => {
+                // create a Metadata instance
+                let metadata_reranker = GgmlMetadataBuilder::new(
+                    cli.model_name[0].clone(),
+                    cli.model_alias[0].clone(),
+                    cli.prompt_template[0],
+                )
+                .with_ctx_size(cli.ctx_size[0])
+                .with_batch_size(cli.batch_size[0])
+                .with_main_gpu(cli.main_gpu)
+                .with_tensor_split(cli.tensor_split)
+                .with_threads(cli.threads)
+                .enable_plugin_log(true)
+                .enable_debug_log(plugin_debug)
+                .build();
+
+                // set the reranker model config
+                reranker_model_config = Some(ModelConfig {
+                    name: metadata_reranker.model_name.clone(),
+                    ty: "reranker".to_string(),
+                    ctx_size: metadata_reranker.ctx_size,
+                    batch_size: metadata_reranker.batch_size,
+                    ..Default::default()
+                });
+
+                // initialize the core context
+                llama_core::init_core_context(None, None, Some(&[metadata_reranker]))
                     .map_err(|e| ServerError::Operation(format!("{}", e)))?;
             }
             _ => {
@@ -369,11 +399,11 @@ async fn main() -> Result<(), ServerError> {
                 });
 
                 // initialize the core context
-                llama_core::init_ggml_context(Some(&[metadata_chat]), None)
+                llama_core::init_core_context(Some(&[metadata_chat]), None, None)
                     .map_err(|e| ServerError::Operation(format!("{}", e)))?;
             }
         }
-    } else if cli.prompt_template.len() == 2 {
+    } else if cli.prompt_template.len() == 3 {
         // create a Metadata instance
         let metadata_chat = GgmlMetadataBuilder::new(
             cli.model_name[0].clone(),
@@ -419,7 +449,7 @@ async fn main() -> Result<(), ServerError> {
             frequency_penalty: Some(metadata_chat.frequency_penalty),
         });
 
-        // create a Metadata instance
+        // create a embedding Metadata instance
         let metadata_embedding = GgmlMetadataBuilder::new(
             cli.model_name[1].clone(),
             cli.model_alias[1].clone(),
@@ -428,7 +458,7 @@ async fn main() -> Result<(), ServerError> {
         .with_ctx_size(cli.ctx_size[1])
         .with_batch_size(cli.batch_size[1])
         .with_main_gpu(cli.main_gpu)
-        .with_tensor_split(cli.tensor_split)
+        .with_tensor_split(cli.tensor_split.clone())
         .with_threads(cli.threads)
         .enable_plugin_log(true)
         .enable_debug_log(plugin_debug)
@@ -443,8 +473,32 @@ async fn main() -> Result<(), ServerError> {
             ..Default::default()
         });
 
+        // create a reranker Metadata instance
+        let metadata_reranker = GgmlMetadataBuilder::new(
+            cli.model_name[2].clone(),
+            cli.model_alias[2].clone(),
+            cli.prompt_template[2],
+        )
+        .with_ctx_size(cli.ctx_size[2])
+        .with_batch_size(cli.batch_size[2])
+        .with_main_gpu(cli.main_gpu)
+        .with_tensor_split(cli.tensor_split)
+        .with_threads(cli.threads)
+        .enable_plugin_log(true)
+        .enable_debug_log(plugin_debug)
+        .build();
+
+        // set the reranker model config
+        reranker_model_config = Some(ModelConfig {
+            name: metadata_reranker.model_name.clone(),
+            ty: "reranker".to_string(),
+            ctx_size: metadata_reranker.ctx_size,
+            batch_size: metadata_reranker.batch_size,
+            ..Default::default()
+        });
+
         // initialize the core context
-        llama_core::init_ggml_context(Some(&[metadata_chat]), Some(&[metadata_embedding]))
+        llama_core::init_core_context(Some(&[metadata_chat]), Some(&[metadata_embedding]), Some(&[metadata_reranker]))
             .map_err(|e| ServerError::Operation(format!("{}", e)))?;
     }
 
@@ -484,6 +538,7 @@ async fn main() -> Result<(), ServerError> {
         },
         chat_model: chat_model_config,
         embedding_model: embedding_model_config,
+        reranker_model: reranker_model_config,
         extras: HashMap::new(),
     };
     SERVER_INFO
@@ -622,6 +677,8 @@ pub(crate) struct ServerInfo {
     chat_model: Option<ModelConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     embedding_model: Option<ModelConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reranker_model: Option<ModelConfig>,
     extras: HashMap<String, String>,
 }
 
@@ -639,7 +696,7 @@ pub(crate) struct ApiServer {
 pub(crate) struct ModelConfig {
     // model name
     name: String,
-    // type: chat or embedding
+    // type: chat or embedding or reranker
     #[serde(rename = "type")]
     ty: String,
     pub ctx_size: u64,
