@@ -308,6 +308,7 @@ async fn main() -> Result<(), ServerError> {
                 .with_threads(cli.threads)
                 .enable_plugin_log(true)
                 .enable_debug_log(plugin_debug)
+                .enable_embeddings(true)
                 .build();
 
                 // set the embedding model config
@@ -337,6 +338,7 @@ async fn main() -> Result<(), ServerError> {
                 .with_threads(cli.threads)
                 .enable_plugin_log(true)
                 .enable_debug_log(plugin_debug)
+                .enable_reranking(true)
                 .build();
 
                 // set the reranker model config
@@ -462,6 +464,7 @@ async fn main() -> Result<(), ServerError> {
         .with_threads(cli.threads)
         .enable_plugin_log(true)
         .enable_debug_log(plugin_debug)
+        .enable_embeddings(true)
         .build();
 
         // set the embedding model config
@@ -486,6 +489,7 @@ async fn main() -> Result<(), ServerError> {
         .with_threads(cli.threads)
         .enable_plugin_log(true)
         .enable_debug_log(plugin_debug)
+        .enable_reranking(true)
         .build();
 
         // set the reranker model config

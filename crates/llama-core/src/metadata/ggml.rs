@@ -44,6 +44,11 @@ impl GgmlMetadataBuilder {
         self
     }
 
+    pub fn enable_reranking(mut self, enable: bool) -> Self {
+        self.metadata.reranking = enable;
+        self
+    }
+
     pub fn with_n_predict(mut self, n: u64) -> Self {
         self.metadata.n_predict = n;
         self

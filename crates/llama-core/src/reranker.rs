@@ -12,6 +12,12 @@ use endpoints::{
     common::Usage,
     reranker::{RerankerObject, RerankerRequest, RerankerResponse},
 };
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RerankingScores {
+    scores: Vec<f64>,
+}
 
 pub async fn reranker(
     reranker_request: &RerankerRequest,
@@ -74,7 +80,7 @@ pub async fn reranker(
         graph.update_metadata()?;
     }
 
-    let (data, usage) = compute_reranking(graph, &reranker_request.query, &reranker_request.documents)?;
+    let (data, usage) = compute_reranking(graph, &reranker_request.query, &reranker_request.documents, reranker_request.top_n)?;
 
     let reranker_response = RerankerResponse {
         object: String::from("list"),
@@ -93,7 +99,8 @@ pub async fn reranker(
 fn compute_reranking(
     graph: &mut Graph<GgmlMetadata>, 
     query: &str,
-    documents: &[String]
+    documents: &[String],
+    top_n: Option<usize>
 ) -> Result<(Vec<RerankerObject>, Usage), LlamaCoreError> {
     #[cfg(feature = "logging")]
     info!(target: "stdout", "Reranking {} documents for query {}", documents.len(), query);
@@ -102,8 +109,17 @@ fn compute_reranking(
     let mut reranked_documents: Vec<RerankerObject> = Vec::new();
     let mut usage = Usage::default();
     for (idx, document) in documents.iter().enumerate() {
+
+        #[cfg(feature = "logging")]
+        info!(target: "stdout", "Query: {}", query);
+        #[cfg(feature = "logging")] 
+        info!(target: "stdout", "Document {}: {}", idx + 1, document);
         // set input
-        let tensor_data = document.as_bytes().to_vec();
+        let tensor_data = format!("{}</s></s>{}", query, document).into_bytes();
+
+        #[cfg(feature = "logging")]
+        info!(target: "stdout", "Input tensor data: {:?}", tensor_data);
+
         graph
             .set_input(0, wasmedge_wasi_nn::TensorType::U8, &[1], &tensor_data)
             .map_err(|e| {
@@ -138,9 +154,20 @@ fn compute_reranking(
 
                 info!(target: "stdout", "Output: {}", output);
 
+                // deserialize the reranking score data
+                let scores: RerankingScores = serde_json::from_str(output).map_err(|e| {
+                    let err_msg = format!("Failed to deserialize the reranking score data. Reason: {}", e);
+
+                    #[cfg(feature = "logging")]
+                    error!(target: "stdout", "{}", &err_msg);
+
+                    LlamaCoreError::Operation(err_msg)
+                })?;
+                let reranking_score = scores.scores[0];
+
                 let reranker_object = RerankerObject {
                     index: idx as u64,
-                    relevance_score: 1.0,
+                    relevance_score: reranking_score,
                 };
 
                 reranked_documents.push(reranker_object);
@@ -164,6 +191,13 @@ fn compute_reranking(
     #[cfg(feature = "logging")]
     info!(target: "stdout", "Reranking documents for query {} completed.", query);
 
+    // Sort documents by relevance score in descending order
+    reranked_documents.sort_by(|a, b| b.relevance_score.partial_cmp(&a.relevance_score).unwrap());
+
+    // Truncate to top_n results if specified
+    if let Some(top_n) = top_n {
+        reranked_documents.truncate(top_n);
+    }
 
     Ok((reranked_documents, usage))
 }
