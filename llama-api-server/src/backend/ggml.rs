@@ -3,9 +3,9 @@ use endpoints::{
     chat::ChatCompletionRequest,
     completions::CompletionRequest,
     embeddings::EmbeddingRequest,
-    reranker::RerankerRequest,
     files::{DeleteFileStatus, FileObject, ListFilesResponse},
     rag::{ChunksRequest, ChunksResponse},
+    reranker::RerankerRequest,
 };
 use futures_util::TryStreamExt;
 use hyper::{body::to_bytes, Body, Method, Request, Response};
@@ -281,7 +281,7 @@ pub(crate) async fn reranker_handler(mut req: Request<Body>) -> Response<Body> {
             error!(target: "stdout", "{}", &err_msg);
 
             error::internal_server_error(err_msg)
-        }   
+        }
     };
 
     info!(target: "stdout", "Send the reranker response.");

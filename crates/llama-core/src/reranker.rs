@@ -1,4 +1,3 @@
-
 //! Define APIs for reranking.
 
 use crate::{
@@ -6,7 +5,7 @@ use crate::{
     metadata::ggml::GgmlMetadata,
     running_mode,
     utils::{get_output_buffer, get_token_info_by_graph},
-    Graph, RunningMode, RERANKER_GRAPHS, OUTPUT_TENSOR,
+    Graph, RunningMode, OUTPUT_TENSOR, RERANKER_GRAPHS,
 };
 use endpoints::{
     common::Usage,
@@ -61,7 +60,7 @@ pub async fn reranker(
 
     let graph = match reranker_graphs.contains_key(model_name) {
         true => reranker_graphs.get_mut(model_name).unwrap(),
-        false => match reranker_graphs.iter_mut().next()     {
+        false => match reranker_graphs.iter_mut().next() {
             Some((_, graph)) => graph,
             None => {
                 let err_msg = "There is no model available in the reranker graphs.";
@@ -80,7 +79,12 @@ pub async fn reranker(
         graph.update_metadata()?;
     }
 
-    let (data, usage) = compute_reranking(graph, &reranker_request.query, &reranker_request.documents, reranker_request.top_n)?;
+    let (data, usage) = compute_reranking(
+        graph,
+        &reranker_request.query,
+        &reranker_request.documents,
+        reranker_request.top_n,
+    )?;
 
     let reranker_response = RerankerResponse {
         object: String::from("list"),
@@ -95,12 +99,11 @@ pub async fn reranker(
     Ok(reranker_response)
 }
 
-
 fn compute_reranking(
-    graph: &mut Graph<GgmlMetadata>, 
+    graph: &mut Graph<GgmlMetadata>,
     query: &str,
     documents: &[String],
-    top_n: Option<usize>
+    top_n: Option<usize>,
 ) -> Result<(Vec<RerankerObject>, Usage), LlamaCoreError> {
     #[cfg(feature = "logging")]
     info!(target: "stdout", "Reranking {} documents for query {}", documents.len(), query);
@@ -109,10 +112,9 @@ fn compute_reranking(
     let mut reranked_documents: Vec<RerankerObject> = Vec::new();
     let mut usage = Usage::default();
     for (idx, document) in documents.iter().enumerate() {
-
         #[cfg(feature = "logging")]
         info!(target: "stdout", "Query: {}", query);
-        #[cfg(feature = "logging")] 
+        #[cfg(feature = "logging")]
         info!(target: "stdout", "Document {}: {}", idx + 1, document);
         // set input
         let tensor_data = format!("{}</s></s>{}", query, document).into_bytes();
@@ -130,7 +132,7 @@ fn compute_reranking(
 
                 LlamaCoreError::Backend(BackendError::SetInput(err_msg))
             })?;
-        
+
         #[cfg(feature = "logging")]
         info!(target: "stdout", "Reranking document {}", idx + 1);
 
@@ -156,7 +158,10 @@ fn compute_reranking(
 
                 // deserialize the reranking score data
                 let scores: RerankingScores = serde_json::from_str(output).map_err(|e| {
-                    let err_msg = format!("Failed to deserialize the reranking score data. Reason: {}", e);
+                    let err_msg = format!(
+                        "Failed to deserialize the reranking score data. Reason: {}",
+                        e
+                    );
 
                     #[cfg(feature = "logging")]
                     error!(target: "stdout", "{}", &err_msg);
@@ -185,7 +190,7 @@ fn compute_reranking(
 
                 return Err(LlamaCoreError::Backend(BackendError::Compute(err_msg)));
             }
-        }   
+        }
     }
 
     #[cfg(feature = "logging")]

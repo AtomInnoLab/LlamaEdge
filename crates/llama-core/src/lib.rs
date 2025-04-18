@@ -265,7 +265,7 @@ pub fn get_plugin_info() -> Result<PluginInfo, LlamaCoreError> {
         #[cfg(feature = "logging")]
         error!(target: "stdout", "{}", err_msg);
 
-        Err(LlamaCoreError::Operation(err_msg.into()))
+        Err(LlamaCoreError::Operation(err_msg))
     };
 
     let (graphs, graph_type) = graph_info?;
@@ -276,7 +276,7 @@ pub fn get_plugin_info() -> Result<PluginInfo, LlamaCoreError> {
         #[cfg(feature = "logging")]
         error!(target: "stdout", "{}", err_msg);
 
-        LlamaCoreError::Operation(err_msg.into())
+        LlamaCoreError::Operation(err_msg)
     })?;
 
     let graphs = graphs.lock().map_err(|e| {
@@ -294,7 +294,7 @@ pub fn get_plugin_info() -> Result<PluginInfo, LlamaCoreError> {
         #[cfg(feature = "logging")]
         error!(target: "stdout", "{}", err_msg);
 
-        LlamaCoreError::Operation(err_msg.into())
+        LlamaCoreError::Operation(err_msg)
     })?;
 
     get_plugin_info_by_graph(graph)
@@ -418,33 +418,33 @@ impl std::fmt::Display for RunningMode {
 
 impl RunningMode {
     pub fn contains_chat(&self) -> bool {
-        match self {
-            RunningMode::Rag => true,
-            RunningMode::Chat => true,
-            RunningMode::ChatEmbedding => true,
-            RunningMode::ChatEmbeddingReranker => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            RunningMode::Rag
+                | RunningMode::Chat
+                | RunningMode::ChatEmbedding
+                | RunningMode::ChatEmbeddingReranker
+        )
     }
 
     pub fn contains_embedding(&self) -> bool {
-        match self {
-            RunningMode::Rag => true,
-            RunningMode::Embeddings => true,
-            RunningMode::ChatEmbedding => true,
-            RunningMode::ChatEmbeddingReranker => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            RunningMode::Rag
+                | RunningMode::Embeddings
+                | RunningMode::ChatEmbedding
+                | RunningMode::ChatEmbeddingReranker
+        )
     }
 
     pub fn contains_reranker(&self) -> bool {
-        match self {
-            RunningMode::Reranker => true,
-            RunningMode::ChatReranker => true,
-            RunningMode::EmbeddingReranker => true,
-            RunningMode::ChatEmbeddingReranker => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            RunningMode::Reranker
+                | RunningMode::ChatReranker
+                | RunningMode::EmbeddingReranker
+                | RunningMode::ChatEmbeddingReranker
+        )
     }
 }
 

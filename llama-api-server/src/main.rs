@@ -161,7 +161,7 @@ async fn main() -> Result<(), ServerError> {
             "Invalid setting for model name. For running chat or embedding model, please specify a single model name. For running both chat and embedding models, please specify two model names: the first one for chat model, the other for embedding model.".to_owned(),
         ));
     }
-    info!(target: "stdout", "model_name: {}", cli.model_name.join(",").to_string());
+    info!(target: "stdout", "model_name: {}", cli.model_name.join(","));
 
     // log model alias
     let mut model_alias = String::new();
@@ -319,9 +319,9 @@ async fn main() -> Result<(), ServerError> {
 
     // initialize the core context
     llama_core::init_ggml_context(
-        (!chat_metadatas.is_empty()).then(|| chat_metadatas.as_slice()),
-        (!embedding_metadatas.is_empty()).then(|| embedding_metadatas.as_slice()),
-        (!reranker_metadatas.is_empty()).then(|| reranker_metadatas.as_slice()),
+        (!chat_metadatas.is_empty()).then_some(chat_metadatas.as_slice()),
+        (!embedding_metadatas.is_empty()).then_some(embedding_metadatas.as_slice()),
+        (!reranker_metadatas.is_empty()).then_some(reranker_metadatas.as_slice()),
     )
     .map_err(|e| ServerError::Operation(format!("{}", e)))?;
 
@@ -370,7 +370,7 @@ async fn main() -> Result<(), ServerError> {
 
     let new_service = make_service_fn(move |conn: &AddrStream| {
         // log socket address
-        info!(target: "stdout", "remote_addr: {}, local_addr: {}", conn.remote_addr().to_string(), conn.local_addr().to_string());
+        info!(target: "stdout", "remote_addr: {}, local_addr: {}", conn.remote_addr(), conn.local_addr());
 
         // web ui
         let web_ui = cli.web_ui.to_string_lossy().to_string();

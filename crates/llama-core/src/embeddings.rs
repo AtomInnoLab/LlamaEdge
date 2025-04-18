@@ -145,7 +145,7 @@ fn compute_embeddings(
 
         #[cfg(feature = "logging")]
         info!(target: "stdout", "Input tensor data: {:?}", tensor_data);
-        
+
         graph
             .set_input(0, wasmedge_wasi_nn::TensorType::U8, &[1], &tensor_data)
             .map_err(|e| {
