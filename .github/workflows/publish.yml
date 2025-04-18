@@ -62,10 +62,13 @@ jobs:
       - name: Create Release and Upload Release Asset
         if: ${{ github.event.inputs.create_release == 'true' && github.ref == 'refs/heads/main'}}
         uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         with:
           name: ${{ steps.tag_and_release_names.outputs.release_name }}
           tag_name: ${{ steps.tag_and_release_names.outputs.tag_name }}
           body: TODO New Release.
+          token: ${{ secrets.GITHUB_TOKEN }}
           draft: true
           prerelease: true
           files: |
