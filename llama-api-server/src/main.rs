@@ -16,7 +16,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
 };
-use llama_core::metadata::ggml::GgmlMetadataBuilder;
+use llama_core::{metadata::ggml::GgmlMetadataBuilder, GgmlMetadata};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
@@ -292,219 +292,38 @@ async fn main() -> Result<(), ServerError> {
     let mut chat_model_config = None;
     let mut embedding_model_config = None;
     let mut reranker_model_config = None;
-    if cli.prompt_template.len() == 1 {
-        match cli.prompt_template[0] {
+
+    let mut chat_metadatas = Vec::new();
+    let mut embedding_metadatas = Vec::new();
+    let mut reranker_metadatas = Vec::new();
+
+    for (i, prompt_type) in cli.prompt_template.iter().enumerate() {
+        match prompt_type {
             PromptTemplateType::Embedding => {
-                // create a Metadata instance
-                let metadata_embedding = GgmlMetadataBuilder::new(
-                    cli.model_name[0].clone(),
-                    cli.model_alias[0].clone(),
-                    cli.prompt_template[0],
-                )
-                .with_ctx_size(cli.ctx_size[0])
-                .with_batch_size(cli.batch_size[0])
-                .with_main_gpu(cli.main_gpu)
-                .with_tensor_split(cli.tensor_split)
-                .with_threads(cli.threads)
-                .enable_plugin_log(true)
-                .enable_debug_log(plugin_debug)
-                .enable_embeddings(true)
-                .build();
-
-                // set the embedding model config
-                embedding_model_config = Some(ModelConfig {
-                    name: metadata_embedding.model_name.clone(),
-                    ty: "embedding".to_string(),
-                    ctx_size: metadata_embedding.ctx_size,
-                    batch_size: metadata_embedding.batch_size,
-                    ..Default::default()
-                });
-
-                // initialize the core context
-                llama_core::init_ggml_context(None, Some(&[metadata_embedding]), None)
-                    .map_err(|e| ServerError::Operation(format!("{}", e)))?;
+                let metadata = create_embedding_metadata(&cli, i, plugin_debug);
+                embedding_model_config = Some(create_model_config(&metadata, "embedding"));
+                embedding_metadatas.push(metadata);
             }
             PromptTemplateType::Reranker => {
-                // create a Metadata instance
-                let metadata_reranker = GgmlMetadataBuilder::new(
-                    cli.model_name[0].clone(),
-                    cli.model_alias[0].clone(),
-                    cli.prompt_template[0],
-                )
-                .with_ctx_size(cli.ctx_size[0])
-                .with_batch_size(cli.batch_size[0])
-                .with_main_gpu(cli.main_gpu)
-                .with_tensor_split(cli.tensor_split)
-                .with_threads(cli.threads)
-                .enable_plugin_log(true)
-                .enable_debug_log(plugin_debug)
-                .enable_reranking(true)
-                .build();
-
-                // set the reranker model config
-                reranker_model_config = Some(ModelConfig {
-                    name: metadata_reranker.model_name.clone(),
-                    ty: "reranker".to_string(),
-                    ctx_size: metadata_reranker.ctx_size,
-                    batch_size: metadata_reranker.batch_size,
-                    ..Default::default()
-                });
-
-                // initialize the core context
-                llama_core::init_ggml_context(None, None, Some(&[metadata_reranker]))
-                    .map_err(|e| ServerError::Operation(format!("{}", e)))?;
+                let metadata = create_reranker_metadata(&cli, i, plugin_debug);
+                reranker_model_config = Some(create_model_config(&metadata, "reranker"));
+                reranker_metadatas.push(metadata);
             }
             _ => {
-                // create a Metadata instance
-                let metadata_chat = GgmlMetadataBuilder::new(
-                    cli.model_name[0].clone(),
-                    cli.model_alias[0].clone(),
-                    cli.prompt_template[0],
-                )
-                .with_ctx_size(cli.ctx_size[0])
-                .with_batch_size(cli.batch_size[0])
-                .with_n_predict(cli.n_predict)
-                .with_n_gpu_layers(cli.n_gpu_layers)
-                .with_main_gpu(cli.main_gpu)
-                .with_tensor_split(cli.tensor_split)
-                .with_threads(cli.threads)
-                .disable_mmap(cli.no_mmap)
-                .with_temperature(cli.temp)
-                .with_top_p(cli.top_p)
-                .with_repeat_penalty(cli.repeat_penalty)
-                .with_presence_penalty(cli.presence_penalty)
-                .with_frequency_penalty(cli.frequency_penalty)
-                .with_grammar(cli.grammar)
-                .with_json_schema(cli.json_schema)
-                .with_reverse_prompt(cli.reverse_prompt)
-                .with_mmproj(cli.llava_mmproj.clone())
-                .enable_plugin_log(true)
-                .enable_debug_log(plugin_debug)
-                .build();
-
-                // set the chat model config
-                chat_model_config = Some(ModelConfig {
-                    name: metadata_chat.model_name.clone(),
-                    ty: "chat".to_string(),
-                    ctx_size: metadata_chat.ctx_size,
-                    batch_size: metadata_chat.batch_size,
-                    prompt_template: Some(metadata_chat.prompt_template),
-                    n_predict: Some(metadata_chat.n_predict),
-                    reverse_prompt: metadata_chat.reverse_prompt.clone(),
-                    n_gpu_layers: Some(metadata_chat.n_gpu_layers),
-                    use_mmap: metadata_chat.use_mmap,
-                    temperature: Some(metadata_chat.temperature),
-                    top_p: Some(metadata_chat.top_p),
-                    repeat_penalty: Some(metadata_chat.repeat_penalty),
-                    presence_penalty: Some(metadata_chat.presence_penalty),
-                    frequency_penalty: Some(metadata_chat.frequency_penalty),
-                });
-
-                // initialize the core context
-                llama_core::init_ggml_context(Some(&[metadata_chat]), None, None)
-                    .map_err(|e| ServerError::Operation(format!("{}", e)))?;
+                let metadata = create_chat_metadata(&cli, i, plugin_debug);
+                chat_model_config = Some(create_model_config(&metadata, "chat"));
+                chat_metadatas.push(metadata);
             }
         }
-    } else if cli.prompt_template.len() == 3 {
-        // create a Metadata instance
-        let metadata_chat = GgmlMetadataBuilder::new(
-            cli.model_name[0].clone(),
-            cli.model_alias[0].clone(),
-            cli.prompt_template[0],
-        )
-        .with_ctx_size(cli.ctx_size[0])
-        .with_batch_size(cli.batch_size[0])
-        .with_n_predict(cli.n_predict)
-        .with_n_gpu_layers(cli.n_gpu_layers)
-        .with_main_gpu(cli.main_gpu)
-        .with_tensor_split(cli.tensor_split.clone())
-        .with_threads(cli.threads)
-        .disable_mmap(cli.no_mmap)
-        .with_temperature(cli.temp)
-        .with_top_p(cli.top_p)
-        .with_repeat_penalty(cli.repeat_penalty)
-        .with_presence_penalty(cli.presence_penalty)
-        .with_frequency_penalty(cli.frequency_penalty)
-        .with_grammar(cli.grammar)
-        .with_json_schema(cli.json_schema)
-        .with_reverse_prompt(cli.reverse_prompt)
-        .with_mmproj(cli.llava_mmproj.clone())
-        .enable_plugin_log(true)
-        .enable_debug_log(plugin_debug)
-        .build();
-
-        // set the chat model config
-        chat_model_config = Some(ModelConfig {
-            name: metadata_chat.model_name.clone(),
-            ty: "chat".to_string(),
-            ctx_size: metadata_chat.ctx_size,
-            batch_size: metadata_chat.batch_size,
-            prompt_template: Some(metadata_chat.prompt_template),
-            n_predict: Some(metadata_chat.n_predict),
-            reverse_prompt: metadata_chat.reverse_prompt.clone(),
-            n_gpu_layers: Some(metadata_chat.n_gpu_layers),
-            use_mmap: metadata_chat.use_mmap,
-            temperature: Some(metadata_chat.temperature),
-            top_p: Some(metadata_chat.top_p),
-            repeat_penalty: Some(metadata_chat.repeat_penalty),
-            presence_penalty: Some(metadata_chat.presence_penalty),
-            frequency_penalty: Some(metadata_chat.frequency_penalty),
-        });
-
-        // create a embedding Metadata instance
-        let metadata_embedding = GgmlMetadataBuilder::new(
-            cli.model_name[1].clone(),
-            cli.model_alias[1].clone(),
-            cli.prompt_template[1],
-        )
-        .with_ctx_size(cli.ctx_size[1])
-        .with_batch_size(cli.batch_size[1])
-        .with_main_gpu(cli.main_gpu)
-        .with_tensor_split(cli.tensor_split.clone())
-        .with_threads(cli.threads)
-        .enable_plugin_log(true)
-        .enable_debug_log(plugin_debug)
-        .enable_embeddings(true)
-        .build();
-
-        // set the embedding model config
-        embedding_model_config = Some(ModelConfig {
-            name: metadata_embedding.model_name.clone(),
-            ty: "embedding".to_string(),
-            ctx_size: metadata_embedding.ctx_size,
-            batch_size: metadata_embedding.batch_size,
-            ..Default::default()
-        });
-
-        // create a reranker Metadata instance
-        let metadata_reranker = GgmlMetadataBuilder::new(
-            cli.model_name[2].clone(),
-            cli.model_alias[2].clone(),
-            cli.prompt_template[2],
-        )
-        .with_ctx_size(cli.ctx_size[2])
-        .with_batch_size(cli.batch_size[2])
-        .with_main_gpu(cli.main_gpu)
-        .with_tensor_split(cli.tensor_split)
-        .with_threads(cli.threads)
-        .enable_plugin_log(true)
-        .enable_debug_log(plugin_debug)
-        .enable_reranking(true)
-        .build();
-
-        // set the reranker model config
-        reranker_model_config = Some(ModelConfig {
-            name: metadata_reranker.model_name.clone(),
-            ty: "reranker".to_string(),
-            ctx_size: metadata_reranker.ctx_size,
-            batch_size: metadata_reranker.batch_size,
-            ..Default::default()
-        });
-
-        // initialize the core context
-        llama_core::init_ggml_context(Some(&[metadata_chat]), Some(&[metadata_embedding]), Some(&[metadata_reranker]))
-            .map_err(|e| ServerError::Operation(format!("{}", e)))?;
     }
+
+    // initialize the core context
+    llama_core::init_ggml_context(
+        (!chat_metadatas.is_empty()).then(|| chat_metadatas.as_slice()),
+        (!embedding_metadatas.is_empty()).then(|| embedding_metadatas.as_slice()),
+        (!reranker_metadatas.is_empty()).then(|| reranker_metadatas.as_slice()),
+    )
+    .map_err(|e| ServerError::Operation(format!("{}", e)))?;
 
     // log plugin version
     let plugin_info =
@@ -725,4 +544,124 @@ pub(crate) struct ModelConfig {
     pub presence_penalty: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency_penalty: Option<f64>,
+}
+
+// Helper function to create chat model metadata
+fn create_chat_metadata(cli: &Cli, index: usize, plugin_debug: bool) -> GgmlMetadata {
+    GgmlMetadataBuilder::new(
+        cli.model_name[index].clone(),
+        cli.model_alias[index].clone(),
+        cli.prompt_template[index],
+    )
+    .with_ctx_size(cli.ctx_size[index])
+    .with_batch_size(cli.batch_size[index])
+    .with_n_predict(cli.n_predict)
+    .with_n_gpu_layers(cli.n_gpu_layers)
+    .with_main_gpu(cli.main_gpu)
+    .with_tensor_split(cli.tensor_split.clone())
+    .with_threads(cli.threads)
+    .disable_mmap(cli.no_mmap)
+    .with_temperature(cli.temp)
+    .with_top_p(cli.top_p)
+    .with_repeat_penalty(cli.repeat_penalty)
+    .with_presence_penalty(cli.presence_penalty)
+    .with_frequency_penalty(cli.frequency_penalty)
+    .with_grammar(cli.grammar.clone())
+    .with_json_schema(cli.json_schema.clone())
+    .with_reverse_prompt(cli.reverse_prompt.clone())
+    .with_mmproj(cli.llava_mmproj.clone())
+    .enable_plugin_log(true)
+    .enable_debug_log(plugin_debug)
+    .build()
+}
+
+// Helper function to create embedding model metadata
+fn create_embedding_metadata(cli: &Cli, index: usize, plugin_debug: bool) -> GgmlMetadata {
+    GgmlMetadataBuilder::new(
+        cli.model_name[index].clone(),
+        cli.model_alias[index].clone(),
+        cli.prompt_template[index],
+    )
+    .with_ctx_size(cli.ctx_size[index])
+    .with_batch_size(cli.batch_size[index])
+    .with_main_gpu(cli.main_gpu)
+    .with_tensor_split(cli.tensor_split.clone())
+    .with_threads(cli.threads)
+    .enable_plugin_log(true)
+    .enable_debug_log(plugin_debug)
+    .enable_embeddings(true)
+    .build()
+}
+
+// Helper function to create reranker model metadata
+fn create_reranker_metadata(cli: &Cli, index: usize, plugin_debug: bool) -> GgmlMetadata {
+    GgmlMetadataBuilder::new(
+        cli.model_name[index].clone(),
+        cli.model_alias[index].clone(),
+        cli.prompt_template[index],
+    )
+    .with_ctx_size(cli.ctx_size[index])
+    .with_batch_size(cli.batch_size[index])
+    .with_main_gpu(cli.main_gpu)
+    .with_tensor_split(cli.tensor_split.clone())
+    .with_threads(cli.threads)
+    .enable_plugin_log(true)
+    .enable_debug_log(plugin_debug)
+    .enable_reranking(true)
+    .build()
+}
+
+// Helper function to create model config from metadata
+fn create_model_config(metadata: &GgmlMetadata, model_type: &str) -> ModelConfig {
+    match model_type {
+        "chat" => ModelConfig {
+            name: metadata.model_name.clone(),
+            ty: "chat".to_string(),
+            ctx_size: metadata.ctx_size,
+            batch_size: metadata.batch_size,
+            prompt_template: Some(metadata.prompt_template),
+            n_predict: Some(metadata.n_predict),
+            reverse_prompt: metadata.reverse_prompt.clone(),
+            n_gpu_layers: Some(metadata.n_gpu_layers),
+            use_mmap: metadata.use_mmap,
+            temperature: Some(metadata.temperature),
+            top_p: Some(metadata.top_p),
+            repeat_penalty: Some(metadata.repeat_penalty),
+            presence_penalty: Some(metadata.presence_penalty),
+            frequency_penalty: Some(metadata.frequency_penalty),
+        },
+        "embedding" => ModelConfig {
+            name: metadata.model_name.clone(),
+            ty: "embedding".to_string(),
+            ctx_size: metadata.ctx_size,
+            batch_size: metadata.batch_size,
+            prompt_template: Some(PromptTemplateType::Embedding),
+            reverse_prompt: metadata.reverse_prompt.clone(),
+            n_gpu_layers: Some(metadata.n_gpu_layers),
+            use_mmap: metadata.use_mmap,
+            temperature: Some(metadata.temperature),
+            top_p: Some(metadata.top_p),
+            repeat_penalty: Some(metadata.repeat_penalty),
+            presence_penalty: Some(metadata.presence_penalty),
+            frequency_penalty: Some(metadata.frequency_penalty),
+            ..Default::default()
+        },
+        "reranker" => ModelConfig {
+            name: metadata.model_name.clone(),
+            ty: "reranker".to_string(),
+            ctx_size: metadata.ctx_size,
+            batch_size: metadata.batch_size,
+            prompt_template: Some(PromptTemplateType::Reranker),
+            reverse_prompt: metadata.reverse_prompt.clone(),
+            n_gpu_layers: Some(metadata.n_gpu_layers),
+            use_mmap: metadata.use_mmap,
+            temperature: Some(metadata.temperature),
+            top_p: Some(metadata.top_p),
+            repeat_penalty: Some(metadata.repeat_penalty),
+            presence_penalty: Some(metadata.presence_penalty),
+            frequency_penalty: Some(metadata.frequency_penalty),
+            ..Default::default()
+        },
+        _ => panic!("Unknown model type"),
+    }
 }

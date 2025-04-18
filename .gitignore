@@ -13,3 +13,5 @@ Cargo.lock
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 *.gguf
+/wasi-sdk-24.0-arm64-macos.tar.gz
+/wasi-sdk-24.0

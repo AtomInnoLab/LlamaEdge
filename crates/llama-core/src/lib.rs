@@ -8,13 +8,13 @@ pub mod audio;
 pub mod chat;
 pub mod completions;
 pub mod embeddings;
-pub mod reranker;
 pub mod error;
 pub mod graph;
 pub mod images;
 pub mod metadata;
 pub mod models;
 pub mod rag;
+pub mod reranker;
 #[cfg(feature = "search")]
 pub mod search;
 pub mod utils;
@@ -69,16 +69,25 @@ pub fn init_ggml_context(
     #[cfg(feature = "logging")]
     info!(target: "stdout", "Initializing the core context");
 
-    if metadata_for_chats.is_none() && metadata_for_embeddings.is_none() && metadata_for_reranker.is_none() {
-        let err_msg = "Failed to initialize the core context. Please set metadata for chat completions and/or embeddings and/or reranker.";
-
-        #[cfg(feature = "logging")]
-        error!(target: "stdout", "{}", err_msg);
-
-        return Err(LlamaCoreError::InitContext(err_msg.into()));
-    }
-
-    let mut mode: RunningMode = RunningMode::Embeddings;
+    let mode = match (
+        metadata_for_chats,
+        metadata_for_embeddings,
+        metadata_for_reranker,
+    ) {
+        (None, None, None) => {
+            let err_msg = "Failed to initialize the core context. Please set metadata for chat completions and/or embeddings and/or reranker.";
+            #[cfg(feature = "logging")]
+            error!(target: "stdout", "{}", err_msg);
+            return Err(LlamaCoreError::InitContext(err_msg.into()));
+        }
+        (None, None, Some(_)) => RunningMode::Reranker,
+        (None, Some(_), None) => RunningMode::Embeddings,
+        (None, Some(_), Some(_)) => RunningMode::EmbeddingReranker,
+        (Some(_), None, None) => RunningMode::Chat,
+        (Some(_), None, Some(_)) => RunningMode::ChatReranker,
+        (Some(_), Some(_), None) => RunningMode::ChatEmbedding,
+        (Some(_), Some(_), Some(_)) => RunningMode::ChatEmbeddingReranker,
+    };
 
     if let Some(metadata_chats) = metadata_for_chats {
         let mut chat_graphs = HashMap::new();
@@ -95,8 +104,6 @@ pub fn init_ggml_context(
 
             LlamaCoreError::InitContext(err_msg.into())
         })?;
-
-        mode = RunningMode::Chat
     }
 
     if let Some(metadata_embeddings) = metadata_for_embeddings {
@@ -116,10 +123,6 @@ pub fn init_ggml_context(
 
                 LlamaCoreError::InitContext(err_msg.into())
             })?;
-
-        if mode == RunningMode::Chat {
-            mode = RunningMode::ChatEmbedding;
-        }
     }
 
     if let Some(metadata_reranker) = metadata_for_reranker {
@@ -139,10 +142,6 @@ pub fn init_ggml_context(
 
                 LlamaCoreError::InitContext(err_msg.into())
             })?;
-
-        if mode == RunningMode::ChatEmbedding {
-            mode = RunningMode::ChatEmbeddingReranker;
-        }
     }
 
     #[cfg(feature = "logging")]
@@ -221,7 +220,7 @@ pub fn init_ggml_rag_context(
             LlamaCoreError::InitContext(err_msg.into())
         })?;
 
-    let running_mode = RunningMode::Rag;
+    let running_mode = RunningMode::ChatEmbedding;
 
     #[cfg(feature = "logging")]
     info!(target: "stdout", "running mode: {}", running_mode);
@@ -249,80 +248,56 @@ pub fn get_plugin_info() -> Result<PluginInfo, LlamaCoreError> {
     #[cfg(feature = "logging")]
     info!(target: "stdout", "Getting the plugin info");
 
-    match running_mode()? {
-        RunningMode::Embeddings => {
-            let embedding_graphs = match EMBEDDING_GRAPHS.get() {
-                Some(embedding_graphs) => embedding_graphs,
-                None => {
-                    let err_msg = "Fail to get the underlying value of `EMBEDDING_GRAPHS`.";
+    let running_mode = running_mode()?;
 
-                    #[cfg(feature = "logging")]
-                    error!(target: "stdout", "{}", err_msg);
+    let graph_info = if running_mode.contains_chat() {
+        Ok((CHAT_GRAPHS.get(), "CHAT_GRAPHS"))
+    } else if running_mode.contains_embedding() {
+        Ok((EMBEDDING_GRAPHS.get(), "EMBEDDING_GRAPHS"))
+    } else if running_mode.contains_reranker() {
+        Ok((RERANKER_GRAPHS.get(), "RERANKER_GRAPHS"))
+    } else {
+        let err_msg = format!(
+            "Fail to get the underlying value of RunningMode `{}`.",
+            running_mode
+        );
 
-                    return Err(LlamaCoreError::Operation(err_msg.into()));
-                }
-            };
+        #[cfg(feature = "logging")]
+        error!(target: "stdout", "{}", err_msg);
 
-            let embedding_graphs = embedding_graphs.lock().map_err(|e| {
-                let err_msg = format!("Fail to acquire the lock of `EMBEDDING_GRAPHS`. {}", e);
+        Err(LlamaCoreError::Operation(err_msg.into()))
+    };
 
-                #[cfg(feature = "logging")]
-                error!(target: "stdout", "{}", &err_msg);
+    let (graphs, graph_type) = graph_info?;
 
-                LlamaCoreError::Operation(err_msg)
-            })?;
+    let graphs = graphs.ok_or_else(|| {
+        let err_msg = format!("Fail to get the underlying value of `{}`.", graph_type);
 
-            let graph = match embedding_graphs.values().next() {
-                Some(graph) => graph,
-                None => {
-                    let err_msg = "Fail to get the underlying value of `EMBEDDING_GRAPHS`.";
+        #[cfg(feature = "logging")]
+        error!(target: "stdout", "{}", err_msg);
 
-                    #[cfg(feature = "logging")]
-                    error!(target: "stdout", "{}", err_msg);
+        LlamaCoreError::Operation(err_msg.into())
+    })?;
 
-                    return Err(LlamaCoreError::Operation(err_msg.into()));
-                }
-            };
+    let graphs = graphs.lock().map_err(|e| {
+        let err_msg = format!("Fail to acquire the lock of `{}`. {}", graph_type, e);
 
-            get_plugin_info_by_graph(graph)
-        }
-        _ => {
-            let chat_graphs = match CHAT_GRAPHS.get() {
-                Some(chat_graphs) => chat_graphs,
-                None => {
-                    let err_msg = "Fail to get the underlying value of `CHAT_GRAPHS`.";
+        #[cfg(feature = "logging")]
+        error!(target: "stdout", "{}", &err_msg);
 
-                    #[cfg(feature = "logging")]
-                    error!(target: "stdout", "{}", err_msg);
+        LlamaCoreError::Operation(err_msg)
+    })?;
 
-                    return Err(LlamaCoreError::Operation(err_msg.into()));
-                }
-            };
+    let graph = graphs.values().next().ok_or_else(|| {
+        let err_msg = format!("Fail to get the underlying value of `{}`.", graph_type);
 
-            let chat_graphs = chat_graphs.lock().map_err(|e| {
-                let err_msg = format!("Fail to acquire the lock of `CHAT_GRAPHS`. {}", e);
+        #[cfg(feature = "logging")]
+        error!(target: "stdout", "{}", err_msg);
 
-                #[cfg(feature = "logging")]
-                error!(target: "stdout", "{}", &err_msg);
+        LlamaCoreError::Operation(err_msg.into())
+    })?;
 
-                LlamaCoreError::Operation(err_msg)
-            })?;
-
-            let graph = match chat_graphs.values().next() {
-                Some(graph) => graph,
-                None => {
-                    let err_msg = "Fail to get the underlying value of `CHAT_GRAPHS`.";
-
-                    #[cfg(feature = "logging")]
-                    error!(target: "stdout", "{}", err_msg);
-
-                    return Err(LlamaCoreError::Operation(err_msg.into()));
-                }
-            };
-
-            get_plugin_info_by_graph(graph)
-        }
-    }
+    get_plugin_info_by_graph(graph)
 }
 
 fn get_plugin_info_by_graph<M: BaseMetadata + serde::Serialize + Clone + Default>(
@@ -421,8 +396,11 @@ pub enum RunningMode {
     Reranker,
     ChatEmbedding,
     ChatEmbeddingReranker,
+    ChatReranker,
+    EmbeddingReranker,
     Rag,
 }
+
 impl std::fmt::Display for RunningMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -432,6 +410,40 @@ impl std::fmt::Display for RunningMode {
             RunningMode::ChatEmbedding => write!(f, "chat-embeddings"),
             RunningMode::ChatEmbeddingReranker => write!(f, "chat-embeddings-reranker"),
             RunningMode::Rag => write!(f, "rag"),
+            RunningMode::ChatReranker => write!(f, "chat-reranker"),
+            RunningMode::EmbeddingReranker => write!(f, "embedding-reranker"),
+        }
+    }
+}
+
+impl RunningMode {
+    pub fn contains_chat(&self) -> bool {
+        match self {
+            RunningMode::Rag => true,
+            RunningMode::Chat => true,
+            RunningMode::ChatEmbedding => true,
+            RunningMode::ChatEmbeddingReranker => true,
+            _ => false,
+        }
+    }
+
+    pub fn contains_embedding(&self) -> bool {
+        match self {
+            RunningMode::Rag => true,
+            RunningMode::Embeddings => true,
+            RunningMode::ChatEmbedding => true,
+            RunningMode::ChatEmbeddingReranker => true,
+            _ => false,
+        }
+    }
+
+    pub fn contains_reranker(&self) -> bool {
+        match self {
+            RunningMode::Reranker => true,
+            RunningMode::ChatReranker => true,
+            RunningMode::EmbeddingReranker => true,
+            RunningMode::ChatEmbeddingReranker => true,
+            _ => false,
         }
     }
 }
